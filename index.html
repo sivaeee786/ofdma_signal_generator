@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Clean OFDM Spectrum Plot</title>
+  <title>OFDM Spectrum, Time Domain, and I/Q Plot</title>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -44,7 +44,7 @@
       line-height: 1.5;
     }
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .wrap { max-width: 1240px; margin: 0 auto; padding: 24px; }
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 24px; }
     .header {
       display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; flex-wrap: wrap;
     }
@@ -61,7 +61,7 @@
       padding: 10px 14px; cursor: pointer; min-width: 44px; min-height: 44px; font-weight: 600;
     }
     .run-btn { background: var(--primary); color: white; border-color: var(--primary); }
-    .grid { display: grid; grid-template-columns: 360px 1fr; gap: 20px; }
+    .grid { display: grid; grid-template-columns: 390px 1fr; gap: 20px; }
     .panel, .plot-panel {
       background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
     }
@@ -92,6 +92,26 @@
     .chip {
       padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); font-size: 0.82rem;
     }
+    .group-card {
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      border-radius: 14px;
+      padding: 12px;
+    }
+    .group-title {
+      display:flex; align-items:center; justify-content:space-between; margin-bottom: 10px;
+      font-weight: 700; color: var(--text);
+    }
+    .mini-btn {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      min-height: 34px;
+    }
     #plot { width: 100%; height: 700px; }
     .stats {
       display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 12px 12px 2px;
@@ -114,8 +134,8 @@
       <div class="brand">
         <div class="logo" aria-label="OFDM logo">OF</div>
         <div>
-          <h1>Clean OFDM Spectrum Plot</h1>
-          <p class="sub">Editable OFDM spectrum with a single <code>ifftshift</code> toggle and CSV export.</p>
+          <h1>OFDM Spectrum, Time Domain, and I/Q Plot</h1>
+          <p class="sub">Multiple active-tone groups, Q-format plotting, and CSV export.</p>
         </div>
       </div>
       <div class="toolbar">
@@ -130,20 +150,31 @@
         <h2 class="section-title">Configuration</h2>
         <div class="form-grid">
           <div class="field">
+            <label for="viewMode">View mode</label>
+            <select id="viewMode">
+              <option value="spectrum" selected>Spectrum</option>
+              <option value="time">Time domain</option>
+              <option value="iq">I/Q</option>
+            </select>
+          </div>
+
+          <div class="field">
             <label for="fftSize">FFT size</label>
             <input id="fftSize" type="number" min="8" max="512" step="1" value="64" />
           </div>
 
           <div class="inline-2">
             <div class="field">
-              <label for="toneStart">Start tone</label>
-              <input id="toneStart" type="number" min="0" step="1" value="1" />
+              <label for="toneGroupCount">Number of active-tone groups</label>
+              <input id="toneGroupCount" type="number" min="1" max="16" step="1" value="1" />
             </div>
             <div class="field">
-              <label for="toneEnd">End tone</label>
-              <input id="toneEnd" type="number" min="0" step="1" value="4" />
+              <label for="groupToneWidth">Default width</label>
+              <input id="groupToneWidth" type="number" min="1" max="64" step="1" value="4" />
             </div>
           </div>
+
+          <div id="toneGroups" class="form-grid"></div>
 
           <div class="field">
             <label for="modulation">Modulation</label>
@@ -163,7 +194,7 @@
           </div>
 
           <div class="field">
-            <label for="qFormat">Q format for CSV export</label>
+            <label for="qFormat">Q format</label>
             <select id="qFormat">
               <option value="float" selected>Float</option>
               <option value="Q15">Q15</option>
@@ -186,15 +217,14 @@
         </div>
 
         <div class="chips">
-          <div class="chip">FFT 64</div>
-          <div class="chip">Tones 1 to 4</div>
-          <div class="chip">QPSK</div>
-          <div class="chip">CP 8</div>
-          <div class="chip">100 symbols</div>
+          <div class="chip">Multi-group active tones</div>
+          <div class="chip">Spectrum / Time / I/Q</div>
+          <div class="chip">Q-format samples</div>
+          <div class="chip">CSV export</div>
         </div>
 
         <div class="note">
-          Choose a Q format for CSV export. Float keeps the raw normalized values, while Q15/Q14/Q12/Q8 export signed fixed-point integers with saturation.
+          Enter one or more active-tone groups, each with its own start and end. The groups are merged into a single active-tone set for OFDM generation.
         </div>
         <div class="error" id="errorBox"></div>
       </aside>
@@ -212,9 +242,11 @@
 
   <script>
     const els = {
+      viewMode: document.getElementById('viewMode'),
       fftSize: document.getElementById('fftSize'),
-      toneStart: document.getElementById('toneStart'),
-      toneEnd: document.getElementById('toneEnd'),
+      toneGroupCount: document.getElementById('toneGroupCount'),
+      groupToneWidth: document.getElementById('groupToneWidth'),
+      toneGroups: document.getElementById('toneGroups'),
       modulation: document.getElementById('modulation'),
       enableShift: document.getElementById('enableShift'),
       qFormat: document.getElementById('qFormat'),
@@ -250,9 +282,10 @@
 
     function getConfig() {
       return {
+        viewMode: els.viewMode.value,
         Nfft: parseInt(els.fftSize.value, 10),
-        toneStart: parseInt(els.toneStart.value, 10),
-        toneEnd: parseInt(els.toneEnd.value, 10),
+        groupCount: parseInt(els.toneGroupCount.value, 10),
+        groupToneWidth: parseInt(els.groupToneWidth.value, 10),
         modulation: els.modulation.value,
         enableShift: els.enableShift.checked,
         qFormat: els.qFormat.value,
@@ -261,16 +294,69 @@
       };
     }
 
-    function validate(cfg) {
+    function validate(cfg, groups) {
       if (!Number.isInteger(cfg.Nfft) || cfg.Nfft < 8) return 'FFT size must be an integer >= 8.';
+      if (!Number.isInteger(cfg.groupCount) || cfg.groupCount < 1) return 'Number of groups must be >= 1.';
+      if (!Number.isInteger(cfg.groupToneWidth) || cfg.groupToneWidth < 1) return 'Default width must be >= 1.';
       if (!Number.isInteger(cfg.cp) || cfg.cp < 0) return 'CP length must be >= 0.';
       if (cfg.cp >= cfg.Nfft) return 'CP length must be smaller than FFT size.';
       if (!Number.isInteger(cfg.numSymbols) || cfg.numSymbols < 1) return 'Number of symbols must be >= 1.';
-      if (!Number.isInteger(cfg.toneStart) || !Number.isInteger(cfg.toneEnd)) return 'Tone indices must be integers.';
-      if (cfg.toneStart < 0 || cfg.toneEnd < 0) return 'Tone indices must be non-negative.';
-      if (cfg.toneStart > cfg.toneEnd) return 'Start tone must be less than or equal to end tone.';
-      if (cfg.toneEnd >= cfg.Nfft) return 'End tone must be smaller than FFT size.';
+      if (groups.length !== cfg.groupCount) return 'Please render the correct number of groups.';
+      for (const g of groups) {
+        if (!Number.isInteger(g.start) || !Number.isInteger(g.end)) return 'Group tone values must be integers.';
+        if (g.start < 0 || g.end < 0) return 'Group tone values must be non-negative.';
+        if (g.start > g.end) return 'Each group start must be less than or equal to end.';
+        if (g.end >= cfg.Nfft) return 'Group end must be smaller than FFT size.';
+      }
       return null;
+    }
+
+    function renderToneGroups(count) {
+      const width = parseInt(els.groupToneWidth.value, 10) || 4;
+      els.toneGroups.innerHTML = '';
+      for (let i = 0; i < count; i++) {
+        const start = 1 + i * (width + 1);
+        const end = Math.min(start + width - 1, 63);
+        const div = document.createElement('div');
+        div.className = 'group-card';
+        div.innerHTML = `
+          <div class="group-title">
+            <span>Group ${i + 1}</span>
+          </div>
+          <div class="inline-2">
+            <div class="field">
+              <label>Start tone</label>
+              <input type="number" class="tone-start" min="0" step="1" value="${start}" />
+            </div>
+            <div class="field">
+              <label>End tone</label>
+              <input type="number" class="tone-end" min="0" step="1" value="${end}" />
+            </div>
+          </div>
+        `;
+        els.toneGroups.appendChild(div);
+      }
+    }
+
+    function getToneGroups() {
+      const starts = [...document.querySelectorAll('.tone-start')];
+      const ends = [...document.querySelectorAll('.tone-end')];
+      const groups = [];
+      for (let i = 0; i < starts.length; i++) {
+        groups.push({
+          start: parseInt(starts[i].value, 10),
+          end: parseInt(ends[i].value, 10)
+        });
+      }
+      return groups;
+    }
+
+    function getActiveTones(groups) {
+      const tones = new Set();
+      for (const g of groups) {
+        for (let k = g.start; k <= g.end; k++) tones.add(k);
+      }
+      return [...tones].sort((a, b) => a - b);
     }
 
     function randSymbol(mod) {
@@ -333,25 +419,34 @@
       return arr.slice(mid).concat(arr.slice(0, mid));
     }
 
-    function generateSignal(cfg) {
-      const active = [];
-      for (let k = cfg.toneStart; k <= cfg.toneEnd; k++) active.push(k);
-      const tx = [];
+    function toFixedQ(v, q) {
+      const fracBits = {Q15: 15, Q14: 14, Q12: 12, Q8: 8}[q];
+      if (q === 'float') return v;
+      const scale = 1 << fracBits;
+      const min = -(1 << fracBits);
+      const max = (1 << fracBits) - 1;
+      return Math.max(min, Math.min(max, Math.round(v * scale)));
+    }
 
+    function quantizeSignal(tx, qFormat) {
+      if (qFormat === 'float') return tx.map(v => ({re: v.re, im: v.im}));
+      return tx.map(v => ({ re: toFixedQ(v.re, qFormat), im: toFixedQ(v.im, qFormat) }));
+    }
+
+    function generateSignal(cfg, activeTones) {
+      const tx = [];
       for (let s = 0; s < cfg.numSymbols; s++) {
         const Xc = Array.from({length: cfg.Nfft}, () => ({re: 0, im: 0}));
-        active.forEach(bin => { Xc[bin] = randSymbol(cfg.modulation); });
+        activeTones.forEach(bin => { Xc[bin] = randSymbol(cfg.modulation); });
         const X = cfg.enableShift ? ifftshift(Xc) : Xc;
         const x = ifft(X);
         const prefix = x.slice(cfg.Nfft - cfg.cp);
         prefix.concat(x).forEach(v => tx.push(v));
       }
-
-      return {tx, activeCount: active.length};
+      return tx;
     }
 
-    function computeSpectrum(cfg) {
-      const {tx, activeCount} = generateSignal(cfg);
+    function computeSpectrum(tx) {
       const Nspec = 4096;
       const usable = Math.min(tx.length, 2048);
       const signal = tx.slice(0, usable);
@@ -362,14 +457,7 @@
       const f = Array.from({length: Nspec}, (_, i) => (i - Nspec / 2) / Nspec);
       const maxVal = Math.max(...shiftedMag);
       const normMag = shiftedMag.map(v => v - maxVal);
-      return {
-        f,
-        psd: normMag,
-        activeCount,
-        totalSamples: tx.length,
-        samplesPerSymbol: cfg.Nfft + cfg.cp,
-        cfg
-      };
+      return { f, psd: normMag };
     }
 
     function updateStats(info) {
@@ -378,16 +466,23 @@
       els.totalStat.textContent = String(info.totalSamples);
     }
 
+    function escapeCsv(value) {
+      const s = String(value);
+      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }
+
     function updatePlot() {
       clearError();
       const cfg = getConfig();
-      const err = validate(cfg);
+      const groups = getToneGroups();
+      const err = validate(cfg, groups);
       if (err) {
         currentResult = null;
         showError(err);
         return;
       }
 
+      const activeTones = getActiveTones(groups);
       const styles = getComputedStyle(document.documentElement);
       const text = styles.getPropertyValue('--text').trim();
       const muted = styles.getPropertyValue('--muted').trim();
@@ -395,59 +490,70 @@
       const surface = styles.getPropertyValue('--surface').trim();
       const primary = styles.getPropertyValue('--primary').trim();
 
-      currentResult = computeSpectrum(cfg);
+      const tx = generateSignal(cfg, activeTones);
+      const txQ = quantizeSignal(tx, cfg.qFormat);
+      const spec = computeSpectrum(tx);
+      currentResult = {
+        cfg,
+        groups,
+        activeTones,
+        tx,
+        txQ,
+        activeCount: activeTones.length,
+        samplesPerSymbol: cfg.Nfft + cfg.cp,
+        totalSamples: tx.length,
+        ...spec
+      };
       updateStats(currentResult);
 
-      const trace = {
-        x: currentResult.f,
-        y: currentResult.psd,
-        mode: 'lines',
-        type: 'scatter',
-        line: {color: primary, width: 2},
-        hovertemplate: 'f = %{x:.4f}<br>Mag = %{y:.2f} dB<extra></extra>'
-      };
-
-      const layout = {
+      let data = [];
+      let layout = {
         paper_bgcolor: surface,
         plot_bgcolor: surface,
         margin: {l: 70, r: 30, t: 56, b: 60},
-        title: {
-          text: `Spectrum | FFT=${cfg.Nfft}, tones=${cfg.toneStart}:${cfg.toneEnd}, ${cfg.modulation}, CP=${cfg.cp}, symbols=${cfg.numSymbols}, ifftshift=${cfg.enableShift ? 'on' : 'off'}`,
-          font: {size: 18, color: text}
-        },
-        xaxis: {
-          title: 'Normalized frequency',
-          color: text,
-          gridcolor: border,
-          zerolinecolor: border,
-          tickfont: {color: muted}
-        },
-        yaxis: {
-          title: 'Magnitude (dB, normalized)',
-          color: text,
-          gridcolor: border,
-          zerolinecolor: border,
-          tickfont: {color: muted},
-          range: [-80, 5]
-        },
+        title: { text: '', font: {size: 18, color: text} },
+        xaxis: { title: '', color: text, gridcolor: border, zerolinecolor: border, tickfont: {color: muted} },
+        yaxis: { title: '', color: text, gridcolor: border, zerolinecolor: border, tickfont: {color: muted} },
         font: {family: 'Inter, sans-serif', color: text}
       };
 
-      Plotly.newPlot('plot', [trace], layout, {responsive: true, displaylogo: false});
-    }
+      const toneLabel = activeTones.length ? `${activeTones[0]}..${activeTones[activeTones.length - 1]}` : 'none';
 
-    function escapeCsv(value) {
-      const s = String(value);
-      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-    }
+      if (cfg.viewMode === 'spectrum') {
+        data = [{
+          x: currentResult.f,
+          y: currentResult.psd,
+          mode: 'lines',
+          type: 'scatter',
+          line: {color: primary, width: 2},
+          hovertemplate: 'f = %{x:.4f}<br>Mag = %{y:.2f} dB<extra></extra>',
+          name: 'Spectrum'
+        }];
+        layout.title.text = `Spectrum | tones=${toneLabel}, Q=${cfg.qFormat}, ifftshift=${cfg.enableShift ? 'on' : 'off'}`;
+        layout.xaxis.title = 'Normalized frequency';
+        layout.yaxis.title = 'Magnitude (dB, normalized)';
+        layout.yaxis.range = [-80, 5];
+      } else if (cfg.viewMode === 'time') {
+        const n = currentResult.txQ.map((_, i) => i);
+        data = [
+          { x: n, y: currentResult.txQ.map(v => v.re), mode: 'lines', type: 'scatter', line: {color: '#01696f', width: 1.5}, name: 'Real' },
+          { x: n, y: currentResult.txQ.map(v => v.im), mode: 'lines', type: 'scatter', line: {color: '#c26b2f', width: 1.5}, name: 'Imag' }
+        ];
+        layout.title.text = `Time Domain Signal | tones=${toneLabel}, Q=${cfg.qFormat}`;
+        layout.xaxis.title = 'Sample index';
+        layout.yaxis.title = cfg.qFormat === 'float' ? 'Amplitude' : 'Fixed-point samples';
+      } else {
+        const n = currentResult.txQ.map((_, i) => i);
+        data = [
+          { x: n, y: currentResult.txQ.map(v => v.re), mode: 'lines', type: 'scatter', line: {color: '#01696f', width: 1.5}, name: 'I' },
+          { x: n, y: currentResult.txQ.map(v => v.im), mode: 'lines', type: 'scatter', line: {color: '#c26b2f', width: 1.5}, name: 'Q' }
+        ];
+        layout.title.text = `I/Q Signal | tones=${toneLabel}, Q=${cfg.qFormat}`;
+        layout.xaxis.title = 'Sample index';
+        layout.yaxis.title = cfg.qFormat === 'float' ? 'Amplitude' : 'Fixed-point samples';
+      }
 
-    function toFixedQ(v, q) {
-      const fracBits = {Q15: 15, Q14: 14, Q12: 12, Q8: 8}[q];
-      if (q === 'float') return v;
-      const scale = 1 << fracBits;
-      const min = -(1 << fracBits);
-      const max = (1 << fracBits) - 1;
-      return Math.max(min, Math.min(max, Math.round(v * scale)));
+      Plotly.newPlot('plot', data, layout, {responsive: true, displaylogo: false});
     }
 
     function exportCsv() {
@@ -456,27 +562,26 @@
         return;
       }
 
-      const {cfg, f, psd, activeCount, samplesPerSymbol, totalSamples} = currentResult;
+      const {cfg, activeTones} = currentResult;
       const rows = [];
       rows.push(['parameter', 'value']);
+      rows.push(['view_mode', cfg.viewMode]);
       rows.push(['fft_size', cfg.Nfft]);
-      rows.push(['tone_start', cfg.toneStart]);
-      rows.push(['tone_end', cfg.toneEnd]);
+      rows.push(['num_groups', cfg.groupCount]);
+      rows.push(['group_tones', activeTones.join('|')]);
       rows.push(['modulation', cfg.modulation]);
       rows.push(['ifftshift_enabled', cfg.enableShift]);
       rows.push(['q_format', cfg.qFormat]);
       rows.push(['cp_length', cfg.cp]);
       rows.push(['num_symbols', cfg.numSymbols]);
-      rows.push(['occupied_tones', activeCount]);
-      rows.push(['samples_per_symbol', samplesPerSymbol]);
-      rows.push(['total_samples', totalSamples]);
+      rows.push(['occupied_tones', currentResult.activeCount]);
+      rows.push(['samples_per_symbol', currentResult.samplesPerSymbol]);
+      rows.push(['total_samples', currentResult.totalSamples]);
       rows.push([]);
-      rows.push(['frequency_normalized', 'magnitude_db_normalized']);
+      rows.push(['sample_index', 'i', 'q']);
 
-      for (let i = 0; i < f.length; i++) {
-        const fx = cfg.qFormat === 'float' ? f[i] : toFixedQ(f[i], cfg.qFormat);
-        const px = cfg.qFormat === 'float' ? psd[i] : toFixedQ(psd[i] / 100, cfg.qFormat);
-        rows.push([fx, px]);
+      for (let i = 0; i < currentResult.txQ.length; i++) {
+        rows.push([i, currentResult.txQ[i].re, currentResult.txQ[i].im]);
       }
 
       const csv = rows.map(row => row.map(escapeCsv).join(',')).join('\n');
@@ -484,19 +589,30 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `ofdm_spectrum_fft${cfg.Nfft}_tones${cfg.toneStart}-${cfg.toneEnd}_${cfg.modulation}_cp${cfg.cp}_sym${cfg.numSymbols}_shift${cfg.enableShift ? 'on' : 'off'}.csv`;
+      a.download = `ofdm_${cfg.viewMode}_groups${cfg.groupCount}_fft${cfg.Nfft}_q${cfg.qFormat}.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
     }
 
+    els.toneGroupCount.addEventListener('change', () => {
+      renderToneGroups(parseInt(els.toneGroupCount.value, 10) || 1);
+      updatePlot();
+    });
+
+    els.groupToneWidth.addEventListener('change', () => {
+      renderToneGroups(parseInt(els.toneGroupCount.value, 10) || 1);
+      updatePlot();
+    });
+
     els.updateBtn.addEventListener('click', updatePlot);
     els.exportBtn.addEventListener('click', exportCsv);
-    ['fftSize', 'toneStart', 'toneEnd', 'modulation', 'enableShift', 'qFormat', 'cpLen', 'numSymbols'].forEach(id => {
+    ['viewMode','fftSize','modulation','enableShift','qFormat','cpLen','numSymbols'].forEach(id => {
       document.getElementById(id).addEventListener('change', updatePlot);
     });
 
+    renderToneGroups(1);
     updatePlot();
   </script>
 </body>
